@@ -1,3 +1,7 @@
+## 專案畫面預覽
+
+> AI Notes Assistant Screenshot](public/images/v1_screenshot)
+
 # AI 筆記管理助手 (v1 版本)
 
 這是一個使用 React＆Node.js＆Express 製作的 AI 筆記管理工具，能夠幫助你記錄學習筆記、編輯進度、並結合 AI 提供每日學習建議卡片。
