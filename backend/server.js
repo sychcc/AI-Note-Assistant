@@ -1,15 +1,13 @@
 import dotenv from "dotenv";
 dotenv.config();
 import geminiRouter from "./gemini.js";
+
 import express from "express";
 import cors from "cors";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 
-// 處理 __dirname (因為使用 ESM 模組)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+//引入mongodb
+import { ObjectId } from "mongodb";
+import { getNotesCollection } from "./mongodb.js";
 
 const app = express();
 const port = 3000;
@@ -17,115 +15,100 @@ const port = 3000;
 // 中介層：允許跨域請求、解析 JSON
 app.use(cors());
 app.use(express.json());
+
 app.use("/api", geminiRouter);
 
-// 建立 GET /notes API
-app.get("/notes", (req, res) => {
-  const filePath = path.join(__dirname, "data", "notes.json");
-  console.log("正在讀取資料檔：", filePath);
-  fs.readFile(filePath, "utf-8", (err, data) => {
-    if (err) {
-      return res.status(500).json({ error: "讀取資料失敗" });
+// 建立 GET /notes API - 移除用戶驗證
+app.get("/notes", async (req, res) => {
+  try {
+    const notesCollection = await getNotesCollection();
+    const notes = await notesCollection.find({}).toArray(); // 移除 userId 篩選
+    res.json(notes);
+  } catch (err) {
+    console.error("讀取筆記失敗:", err);
+    res.status(500).json({ error: "無法讀取資料" });
+  }
+});
+
+//建立 POST /notes API - 移除用戶驗證
+app.post("/notes", async (req, res) => {
+  try {
+    const notesCollection = await getNotesCollection();
+    const newNote = {
+      ...req.body,
+      createdAt: new Date().toISOString(), // 移除 userId
+    };
+
+    const result = await notesCollection.insertOne(newNote);
+    res.status(201).json({ _id: result.insertedId, ...newNote });
+  } catch (err) {
+    console.error("新增筆記失敗:", err);
+    res.status(500).json({ error: "新增筆記失敗" });
+  }
+});
+
+// DELETE /notes/:id - 移除用戶驗證
+app.delete("/notes/:id", async (req, res) => {
+  const noteId = req.params.id;
+
+  try {
+    const notesCollection = await getNotesCollection();
+    const result = await notesCollection.deleteOne({
+      _id: new ObjectId(noteId), // 移除 userId 篩選
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: "找不到該筆記" });
     }
-    res.json(JSON.parse(data));
-  });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("刪除筆記失敗:", err);
+    res.status(500).json({ error: "刪除筆記失敗" });
+  }
 });
 
-//建立 POST /notes API
-app.post("/notes", (req, res) => {
-  console.log("✅ 收到 POST /notes");
-  console.log("📥 req.body:", req.body);
+// PUT /notes/:id - 移除用戶驗證
+app.put("/notes/:id", async (req, res) => {
+  const noteId = req.params.id;
+  const updatedFields = req.body;
 
-  const filePath = path.join(__dirname, "data", "notes.json");
+  try {
+    const notesCollection = await getNotesCollection();
+    const result = await notesCollection.updateOne(
+      {
+        _id: new ObjectId(noteId), // 移除 userId 篩選
+      },
+      { $set: updatedFields }
+    );
 
-  const newNote = {
-    id: Date.now(),
-    title: req.body.title,
-    content: req.body.content,
-    category: req.body.category,
-    progress: req.body.progress || 0,
-    createAt: new Date().toISOString(),
-  };
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "找不到該筆記" });
+    }
 
-  fs.readFile(filePath, "utf-8", (err, data) => {
-    if (err) return res.status(500).json({ error: "讀取資料失敗" });
-
-    const notes = JSON.parse(data);
-    notes.push(newNote);
-
-    fs.writeFile(filePath, JSON.stringify(notes, null, 2), (err) => {
-      if (err) return res.status(500).json({ error: "寫入資料失敗" });
-      //HTTP 201 Created
-      res.status(201).json(newNote);
-    });
-  });
-});
-
-// 刪除筆記 API
-app.delete("/notes/:id", (req, res) => {
-  console.log("🗑️ 收到刪除請求，id =", req.params.id);
-
-  const filePath = path.join(__dirname, "data", "notes.json");
-  const noteId = parseInt(req.params.id); //將id字串轉為數字
-  fs.readFile(filePath, "utf-8", (err, data) => {
-    if (err) return res.status(500).json({ error: "讀取資料失敗" });
-
-    let notes = JSON.parse(data); //解析資料庫的data轉為JS array
-    const newNotes = notes.filter((note) => note.id !== noteId);
-    //用filter留下我想要的東西
-    fs.writeFile(filePath, JSON.stringify(newNotes, null, 2), (err) => {
-      if (err) return res.status(500).json({ error: "刪除資料失敗" });
-
-      res.status(200).json({ success: true });
-    });
-  });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("更新筆記失敗:", err);
+    res.status(500).json({ error: "更新筆記失敗" });
+  }
 });
 
 //GET /ai-tips API
 app.get("/ai-tips", (req, res) => {
   const tips = [
-    "很棒！繼續複習昨天的 React 元件結構與 Props 傳遞",
-    "嘗試用 useEffect 串一次 API 資料～",
-    "筆記內容很不錯！",
+    `很棒！繼續複習昨天的 React 元件結構與 Props 傳遞`,
+    `嘗試用 useEffect 串一次 API 資料～`,
+    `筆記內容很不錯！`,
   ];
 
   // 隨機挑一段
   const randomTip = tips[Math.floor(Math.random() * tips.length)];
   res.json({ tip: randomTip });
 });
-//修改progress
-app.put("/notes/:id", (req, res) => {
-  const filePath = path.join(__dirname, "data", "notes.json");
-  const noteId = req.params.id; // 字串也 OK
-
-  const updatedProgress = req.body.progress;
-
-  fs.readFile(filePath, "utf-8", (err, data) => {
-    if (err) return res.status(500).json({ error: "讀取資料失敗" });
-
-    let notes = JSON.parse(data);
-    let found = false;
-
-    // 修改指定筆記的進度
-    const newNotes = notes.map((note) => {
-      if (String(note.id) === noteId) {
-        found = true;
-        return { ...note, progress: updatedProgress };
-      }
-      return note;
-    });
-
-    if (!found) return res.status(404).json({ error: "找不到該筆記" });
-
-    fs.writeFile(filePath, JSON.stringify(newNotes, null, 2), (err) => {
-      if (err) return res.status(500).json({ error: "寫入資料失敗" });
-
-      res.status(200).json({ success: true });
-    });
-  });
-});
 
 // 啟動伺服器
 app.listen(port, () => {
   console.log(`後端伺服器啟動：http://localhost:${port}`);
+  console.log(`📝 筆記 API：http://localhost:${port}/notes`);
+  console.log(`🤖 AI 建議：http://localhost:${port}/ai-tips`);
 });
